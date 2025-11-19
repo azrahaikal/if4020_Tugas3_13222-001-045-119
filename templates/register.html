@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/static/css/style.css" type="text/css">
+  <title>Registrasi</title>
+</head>
+<body>
+  <div class="center">
+    <main class="card" role="main" aria-labelledby="page-title">
+      <div class="brand" aria-hidden="true">
+        <div class="logo">ITB</div>
+        <div>
+          <h1 id="page-title">Registrasi</h1>
+          <p class="lead">Buat akun untuk chat</p>
+        </div>
+      </div>
+
+      <div id="notice" aria-live="polite"></div>
+
+      <form id="registerForm" method="post" action="/register" novalidate>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username" required maxlength="40" placeholder="Masukkan Username" />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="Masukkan Password" />
+        </div>
+
+        <div class="field">
+          <label for="confirm">Konfirmasi Password</label>
+          <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="8" placeholder="Ketik Ulang Password" />
+        </div>
+
+        <div class="field" style="display:flex;gap:8px;align-items:center;">
+          <input id="showpw" type="checkbox" aria-label="Tampilkan Password" />
+          <label for="showpw" style="margin:0;font-weight:500;color:var(--muted);font-size:13px;">Tampilkan Password</label>
+        </div>
+
+        <div class="field" style="margin-top:8px;">
+          <button type="submit" class="btn btn-primary" id="btnSubmit">Buat Akun</button>
+          <button type="button" class="btn btn-ghost" onclick="location.href='/'" style="margin-left:8px;">Kembali</button>
+        </div>
+      </form>
+
+      <div class="footer">
+        <small>Institut Teknologi Bandung — IF4020</small>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/script.js"></script>
+</body>
+</html>

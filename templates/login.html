@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/static/css/style.css" type="text/css">
+  <title>Login</title>
+</head>
+<body>
+  
+<div class="center">
+    <main class="card" role="main" aria-labelledby="page-title">
+
+      <div class="brand" aria-hidden="true">
+        <div class="logo">ITB</div>
+        <div>
+          <h1 id="page-title">Login</h1>
+          <p class="lead">Masuk akun untuk chat</p>
+        </div>
+      </div>
+
+      <div id="notice"></div>
+
+      <form method="post" action="/login" id="loginForm" novalidate>
+
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" type="text" name="username" required placeholder="Masukkan Username" />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" required placeholder="Masukkan Password" />
+        </div>
+
+        <div class="field" style="display:flex;gap:8px;align-items:center;">
+          <input id="showpw" type="checkbox" aria-label="Tampilkan Password" />
+          <label for="showpw" style="margin:0;font-weight:500;color:var(--muted);font-size:13px;">Tampilkan Password</label>
+        </div>
+
+        <div class="field" style="margin-top:10px;">
+          <button type="submit" class="btn btn-primary" id="btnLogin">Masuk</button>
+          <button type="button" class="btn btn-ghost" onclick="location.href='/'" style="margin-left:10px;">
+            Kembali
+          </button>
+        </div>
+
+      </form>
+
+      <div class="footer">
+        <small>Belum punya akun?</small>
+        <small><a href="/register" style="color:var(--accent);text-decoration:none;">Daftar</a></small>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="/static/js/script.js"></script>
+</body>
+</html>
