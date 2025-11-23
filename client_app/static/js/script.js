@@ -1,8 +1,5 @@
-// --- KONFIGURASI ---
-// Pastikan backend server.py berjalan di port 5000
-const API_URL = "http://127.0.0.1:5000"; 
+const API_URL = "http://localhost:5000";
 
-// --- UTILITIES ---
 function notify(msg, type='error') {
     const el = document.getElementById('notice');
     if(el) el.innerHTML = `<div class="msg ${type}">${msg}</div>`;
@@ -22,10 +19,10 @@ function str2ab(str) {
     return buf;
 }
 
-// --- LOGIKA HALAMAN LOGIN ---
+// --- hlm login ---
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
-    // Show Password Logic (dari kode aslimu)
+    // show password
     const showPw = document.getElementById("showpw");
     const passInput = document.getElementById("password");
     if(showPw && passInput) {
@@ -48,14 +45,14 @@ if (loginForm) {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({username: user, password: pass}),
-                credentials: 'include' // Simpan session cookie
+                credentials: 'include' // menyimpan session cookie
             });
             const data = await res.json();
 
             if (data.status === 'ok') {
-                // Simpan username di localStorage agar bisa dibaca di dashboard
+                // username disimpan di localStorage agar bisa dibaca di dashboard
                 localStorage.setItem('current_user', data.username);
-                // Redirect ke dashboard
+                // ke dashboard
                 window.location.href = "dashboard.html";
             } else {
                 notify(data.message, 'error');
@@ -70,10 +67,10 @@ if (loginForm) {
     });
 }
 
-// --- LOGIKA HALAMAN REGISTER ---
+// --- hlm register
 const regForm = document.getElementById("registerForm");
 if (regForm) {
-    // Show Password Logic
+    // show pass
     const showPw = document.getElementById("showpw");
     const passInput = document.getElementById("password");
     const confInput = document.getElementById("confirm");
@@ -87,7 +84,7 @@ if (regForm) {
 
     regForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        notify(""); // Clear error
+        notify(""); // clear error
 
         const user = document.getElementById("username").value;
         const pass = document.getElementById("password").value;
@@ -101,30 +98,30 @@ if (regForm) {
         btn.innerText = "Generating Keys...";
 
         try {
-            // 1. Generate Key Encryption
+            // 1. key encryption
             const encPair = await window.crypto.subtle.generateKey(
                 { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
                 true, ["encrypt", "decrypt"]
             );
             
-            // 2. Generate Key Signing
+            // 2. key signing
             const signPair = await window.crypto.subtle.generateKey(
                 { name: "RSA-PSS", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
                 true, ["sign", "verify"]
             );
 
-            // Export Public Keys (Kirim ke Server)
+            // kirim public keys (ke server)
             const encPub = arrayBufferToBase64(await window.crypto.subtle.exportKey("spki", encPair.publicKey));
             const signPub = arrayBufferToBase64(await window.crypto.subtle.exportKey("spki", signPair.publicKey));
 
-            // Export Private Keys (Simpan di LocalStorage)
+            // simpan private keys di local storage
             const encPriv = arrayBufferToBase64(await window.crypto.subtle.exportKey("pkcs8", encPair.privateKey));
             const signPriv = arrayBufferToBase64(await window.crypto.subtle.exportKey("pkcs8", signPair.privateKey));
 
             localStorage.setItem('enc_priv_key_' + user, encPriv);
             localStorage.setItem('sign_priv_key_' + user, signPriv);
 
-            // Kirim ke API
+            // kirim ke API
             const res = await fetch(`${API_URL}/api/register`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -154,7 +151,7 @@ if (regForm) {
     });
 }
 
-// --- LOGIKA DASHBOARD ---
+// --- hlm dashboard
 let currentUser = localStorage.getItem('current_user');
 
 async function initDashboard() {
@@ -164,9 +161,9 @@ async function initDashboard() {
     }
     document.getElementById('currentUserDisplay').innerText = currentUser;
 
-    // Load daftar user
+    // ambil daftar user
     await loadUsers();
-    // Mulai polling pesan
+    // polling pesan
     startPolling();
 }
 
@@ -179,7 +176,7 @@ async function doLogout() {
 async function loadUsers() {
     try {
         const res = await fetch(`${API_URL}/api/users`, {credentials: 'include'});
-        if(res.status === 401) { doLogout(); return; } // Session expired
+        if(res.status === 401) { doLogout(); return; } // session expired
         
         const data = await res.json();
         const select = document.getElementById('recipientSelect');
@@ -203,18 +200,18 @@ async function sendMessage() {
     if (!recipient || !text) return alert("Pilih penerima dan isi pesan.");
 
     try {
-        // Ambil Public Key Penerima
+        // mengambil public key kenerima
         const keyRes = await fetch(`${API_URL}/api/get_public_key/${recipient}`);
         const keyData = await keyRes.json();
         if (keyData.status !== 'ok') return alert("User tidak ditemukan");
 
-        // Import Kunci Public (Enc) Penerima
+        // import kunci public penerima
         const encPubKey = await window.crypto.subtle.importKey(
             "spki", str2ab(atob(keyData.keys.public_key)), 
             { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]
         );
         
-        // Load Kunci Private (Sign) Saya
+        // load kunci private diri sendiri
         const mySignPrivStr = localStorage.getItem('sign_priv_key_' + currentUser);
         if(!mySignPrivStr) return alert("Kunci Tanda Tangan hilang. Login ulang.");
 
@@ -223,19 +220,19 @@ async function sendMessage() {
             { name: "RSA-PSS", hash: "SHA-256" }, true, ["sign"]
         );
 
-        // Encrypt Pesan
+        // enkripsi
         const encodedText = new TextEncoder().encode(text);
         const encryptedData = await window.crypto.subtle.encrypt(
             { name: "RSA-OAEP" }, encPubKey, encodedText
         );
 
-        // Sign Hash Ciphertext
+        // sign hash ciphertext
         const msgHashBuffer = await window.crypto.subtle.digest("SHA-256", encryptedData);
         const signatureBuffer = await window.crypto.subtle.sign(
             { name: "RSA-PSS", saltLength: 32 }, mySignPrivKey, msgHashBuffer
         );
 
-        // Kirim ke API
+        // kirim ke api
         await fetch(`${API_URL}/api/messages`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -248,7 +245,7 @@ async function sendMessage() {
             credentials: 'include'
         });
 
-        // Tampilkan pesan sendiri di UI
+        // menampilkan pesan sendiri di UI
         const chatBox = document.getElementById('messageBox');
         chatBox.innerHTML += `
             <div class="msg sent">
@@ -270,10 +267,10 @@ async function fetchMessages() {
         const data = await res.json();
         const chatBox = document.getElementById('messageBox');
         
-        // Untuk demo, kita clear dulu (di real app harusnya append)
+        // clear dulu
         chatBox.innerHTML = ''; 
 
-        // Load Kunci Private (Enc) Saya
+        // ambil kunci private
         const myPrivStr = localStorage.getItem('enc_priv_key_' + currentUser);
         if(!myPrivStr) {
              chatBox.innerHTML = "<p>Private Key tidak ditemukan di browser ini. Tidak bisa membaca pesan.</p>";
@@ -290,7 +287,7 @@ async function fetchMessages() {
             let verifyStatus = "<span class='bad-sig'>Bad Sig</span>";
 
             try {
-                // 1. Verifikasi Signature Pengirim
+                // 1. verifikasi signature pengirim
                 const senderKeyRes = await fetch(`${API_URL}/api/get_public_key/${msg.sender}`);
                 const senderKeyData = await senderKeyRes.json();
                 const senderSignPub = await window.crypto.subtle.importKey(
@@ -308,7 +305,7 @@ async function fetchMessages() {
 
                 if (isValid) verifyStatus = "<span class='verified'>✓ Verified</span>";
 
-                // 2. Dekripsi
+                // 2. dekripsi
                 const decryptedBuf = await window.crypto.subtle.decrypt(
                     { name: "RSA-OAEP" }, myPrivKey, encryptedBuf
                 );

@@ -1,25 +1,35 @@
 from flask import Flask, request, jsonify, session
 from flask_mysqldb import MySQL
-from flask_cors import CORS # Penting untuk komunikasi antar domain
+from flask_cors import CORS 
 import MySQLdb.cursors
 import time
 import os
 
 app = Flask(__name__)
-app.secret_key = "ganti_dengan_secret_key_yang_aman"
+app.secret_key = "RAHASIA_DAPUR_JANGAN_DISEBAR" 
 
-# Izinkan Frontend (Client) mengakses API ini & izinkan pengiriman Cookie (Session)
-CORS(app, supports_credentials=True, resources={r"/*": {"origins": "*"}})
+# --- KONFIGURASI CORS YANG DIPERBAIKI ---
+# Kita izinkan List Origin (localhost DAN 127.0.0.1) untuk menghindari masalah browser
+# Kita juga mengizinkan Headers Content-Type secara eksplisit
+CORS(app, 
+     supports_credentials=True, 
+     resources={
+         r"/*": {
+             "origins": ["http://localhost:8000", "http://127.0.0.1:8000"],
+             "methods": ["GET", "POST", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     })
 
-# --- konfigurasi MySQL ---
+# --- KONFIGURASI MYSQL ---
 app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'root'     
-app.config['MYSQL_PASSWORD'] = 'tubesPPLJ_17Juni2025'   # password MySQL (aku gatau cara gantinya :( )
-app.config['MYSQL_DB'] = 'chatapp_db'  # ini database nya
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = 'tubesPPLJ_17Juni2025' # Sesuaikan jika ada password
+app.config['MYSQL_DB'] = 'chatapp_db'
 
 mysql = MySQL(app)
 
-# --- INIT DB (Hanya dijalankan admin) ---
+# --- INIT DB ---
 @app.route("/init_db")
 def init_db():
     cursor = mysql.connection.cursor()
@@ -79,7 +89,8 @@ def login():
     cursor.close()
 
     if account:
-        session["user"] = account['username'] # Simpan sesi di server
+        session["user"] = account['username'] 
+        session.permanent = True # Agar session tetap tersimpan
         return jsonify({"status": "ok", "username": account['username']})
     else:
         return jsonify({"status": "error", "message": "Login gagal"}), 401
@@ -89,17 +100,11 @@ def logout():
     session.pop("user", None)
     return jsonify({"status": "ok"})
 
-@app.route("/api/check_session")
-def check_session():
-    if "user" in session:
-        return jsonify({"status": "ok", "user": session["user"]})
-    return jsonify({"status": "error"}), 401
-
 # --- DATA ENDPOINTS ---
 
 @app.route("/api/users")
 def get_users():
-    if "user" not in session: return jsonify({"status": "error"}), 401
+    if "user" not in session: return jsonify({"status": "error", "message": "Unauthorized"}), 401
     
     cursor = mysql.connection.cursor()
     cursor.execute('SELECT username FROM users WHERE username != %s', (session['user'],))
@@ -143,5 +148,4 @@ def messages_handler():
         return jsonify({"status": "ok", "messages": msgs})
 
 if __name__ == "__main__":
-    # Jalankan di port 5000
     app.run(debug=True, port=5000)
