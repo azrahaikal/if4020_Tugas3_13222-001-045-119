@@ -6,6 +6,9 @@ Install flask dengan python (pip install flask). Flask digunakan sebagai web fra
 pip install flask-mysqldb
 pip install flask-cors
 
+Install juga untuk kebutuhan kriptografi
+pip install ecdsa
+
 ## Cara Run
 1. Jalankan server.py di terminal 
 2. Masuk ke folder client_app, lalu ketik python -m http.server 8000 di terminal yang berbeda

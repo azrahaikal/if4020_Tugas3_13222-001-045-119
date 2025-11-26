@@ -4,6 +4,9 @@ from flask_cors import CORS
 import MySQLdb.cursors
 import time
 import os
+import secrets
+import hashlib
+from ecdsa import VerifyingKey, NIST256p, BadSignatureError
 
 app = Flask(__name__)
 app.secret_key = "RAHASIA_DAPUR_JANGAN_DISEBAR" 
@@ -55,6 +58,32 @@ def init_db():
 
 # --- AUTH ENDPOINTS ---
 
+login_challenges = {}
+@app.route("/api/request_challenge", methods=["POST"])
+def request_challenge():
+    data = request.json
+    username = data.get("username")
+    
+    # 1. Cek apakah user terdaftar
+    cursor = mysql.connection.cursor()
+    cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+    user = cursor.fetchone()
+    cursor.close()
+    
+    if not user:
+        return jsonify({"status": "error", "message": "User tidak ditemukan"}), 404
+    
+    # 2. Generate Nonce
+    nonce = secrets.token_hex(32)
+    
+    # 3. Simpan di Memori Server
+    login_challenges[username] = {
+        'nonce': nonce,
+    }
+    
+    # 4. Kirim Nonce ke Client
+    return jsonify({"status": "ok", "nonce": nonce})
+
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.json
@@ -81,19 +110,51 @@ def register():
 def login():
     data = request.json
     username = data.get("username")
-    password = data.get("password")
+    signature_hex = data.get("signature")
 
+    # 1. Validasi: Apakah user ini tadi minta challenge?
+    if username not in login_challenges:
+        return jsonify({"status": "error", "message": "Harap request challenge terlebih dahulu"}), 400
+    
+    # Ambil challenge data dan hapus
+    # Agar nonce tidak bisa dipakai ulang
+    challenge_data = login_challenges.pop(username)
+    nonce = challenge_data['nonce']
+
+    # 2. Ambil Kunci Publik User dari Database
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-    cursor.execute('SELECT * FROM users WHERE username = %s AND password = %s', (username, password))
-    account = cursor.fetchone()
+    cursor.execute('SELECT signing_public_key FROM users WHERE username = %s', (username,))
+    user_data = cursor.fetchone()
     cursor.close()
 
-    if account:
-        session["user"] = account['username'] 
-        session.permanent = True # Agar session tetap tersimpan
-        return jsonify({"status": "ok", "username": account['username']})
-    else:
-        return jsonify({"status": "error", "message": "Login gagal"}), 401
+    if not user_data:
+        return jsonify({"status": "error", "message": "User data error"}), 404
+
+    signing_pub_key_hex = user_data['signing_public_key']
+
+    # 3. Verifikais Signature
+    try:
+        # a. Load Kunci Publik dari format Hex String ke Objek ECDSA
+        # Frontend mengirim format Hex Compressed, library python bisa otomatis deteksi
+        vk = VerifyingKey.from_string(bytes.fromhex(signing_pub_key_hex), curve=NIST256p, hashfunc=hashlib.sha256)
+        
+        # b. Hitung Hash dari Nonce (SHA-3)
+        msg_hash = hashlib.sha3_256(nonce.encode('utf-8')).digest()
+        
+        # c. Lakukan Verifikasi
+        vk.verify_digest(bytes.fromhex(signature_hex), msg_hash)
+        
+        # 4. Buat Session Login
+        session["user"] = username
+        session.permanent = True
+        return jsonify({"status": "ok", "username": username})
+
+    except BadSignatureError:
+        # Jika tanda tangan salah (Password user salah / ada yang memalsukan)
+        return jsonify({"status": "error", "message": "Verifikasi Gagal: Signature Salah"}), 401
+    except Exception as e:
+        print(f"Login Error: {e}")
+        return jsonify({"status": "error", "message": "Terjadi kesalahan server"}), 500
 
 @app.route("/api/logout")
 def logout():
