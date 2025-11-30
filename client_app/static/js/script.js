@@ -283,17 +283,17 @@ async function sendMessage() {
         const aesKey = await deriveAesKeyFromEcdh(myPrivHex, recipientPubHex);
         
         // Enkripsi plaintext aja
-        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const inisial = window.crypto.getRandomValues(new Uint8Array(12));
         const encodedText = new TextEncoder().encode(text);
         
         const ciphertextBuf = await window.crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: iv }, aesKey, encodedText
+            { name: "AES-GCM", inisial: inisial }, aesKey, encodedText
         );
 
         // Gabungkan dengan ciphertext lalu jadikan Base64
-        const combined = new Uint8Array(iv.length + ciphertextBuf.byteLength);
-        combined.set(iv);
-        combined.set(new Uint8Array(ciphertextBuf), iv.length);
+        const combined = new Uint8Array(inisial.length + ciphertextBuf.byteLength);
+        combined.set(inisial);
+        combined.set(new Uint8Array(ciphertextBuf), inisial.length);
         const contentBase64 = arrayBufferToBase64(combined.buffer);
 
         // Kirim ke server
@@ -347,12 +347,12 @@ async function fetchMessages() {
 
                 // Pisahkan ciphertext
                 const combined = base64ToArrayBuffer(msg.content);
-                const iv = combined.slice(0, 12);
+                const inisial = combined.slice(0, 12);
                 const ciphertext = combined.slice(12);
 
                 // dekripsi
                 const decryptedBuf = await window.crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv }, aesKey, ciphertext
+                    { name: "AES-GCM", inisial: inisial }, aesKey, ciphertext
                 );
                 plainText = new TextDecoder().decode(decryptedBuf);
 
