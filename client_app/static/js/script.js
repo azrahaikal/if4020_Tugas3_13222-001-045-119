@@ -3,6 +3,36 @@ const API_URL = "http://localhost:5000";
 const EC = elliptic.ec;
 const ec = new EC('p256');
 
+// Untuk generate kunci
+function generateKeyPairFromPassword(username, password) {
+    // 1. Buat seed (entropy) dari SHA256(username + password)
+    const seed = CryptoJS.SHA256(username + password).toString();
+    
+    // 2. Buat Key Pair menggunakan library elliptic
+    const keyPair = ec.keyFromPrivate(seed);
+    return keyPair;
+}
+
+// Kunci AES dari ECDH shared secret
+async function deriveAesKeyFromEcdh(senderPrivHex, recipientPubHex) {
+    // 1. Load kunci pengirim dan kunci penerima ke library elliptic
+    const senderKey = ec.keyFromPrivate(senderPrivHex);
+    const recKey = ec.keyFromPublic(recipientPubHex, 'hex');
+
+    // 2. Derive Shared Secret
+    const sharedSecretBN = senderKey.derive(recKey.getPublic());
+    const sharedSecretHex = sharedSecretBN.toString(16); // konversi ke hex
+
+    // 3. Hash shared secret supaya jadi 32 bytes pas (untuk AES-256)
+    const hashBuffer = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(sharedSecretHex));
+
+    // 4. Import jadi kunci AES-GCM
+    return await window.crypto.subtle.importKey(
+        "raw", hashBuffer,
+        { name: "AES-GCM" }, false, ["encrypt", "decrypt"]
+    );
+}
+
 // --- per formatan duniawi ---
 function notify(msg, type='error') {
     const el = document.getElementById('notice');
@@ -13,14 +43,6 @@ function bufToHex(buffer) {
     return [...new Uint8Array(buffer)]
         .map(x => x.toString(16).padStart(2, '0'))
         .join('');
-}
-
-function hexToBuf(hex) {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-    }
-    return bytes.buffer;
 }
 
 function arrayBufferToBase64(buffer) {
@@ -38,6 +60,14 @@ function base64ToArrayBuffer(base64) {
     return bytes.buffer;
 }
 
+function hexToBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+    return bytes;
+}
+
 // login
 const loginForm = document.getElementById("loginForm");
 if (loginForm) {
@@ -45,22 +75,23 @@ if (loginForm) {
 
     const showPw = document.getElementById("showpw");
     const passInput = document.getElementById("password");
-    if(showPw && passInput) {
+    if(showPw) {
         showPw.addEventListener("change", () => { passInput.type = showPw.checked ? "text" : "password"; });
     }
 
     loginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const user = document.getElementById("username").value.trim(); 
+        const user = document.getElementById("username").value.trim();
+        const pass = document.getElementById("password");
         const btn = document.getElementById("btnLogin");
 
         btn.disabled = true;
         btn.innerText = "Authenticating...";
 
         try {
-            // simpan private key dalam format hex raw local storage saat register
-            const signPrivHex = localStorage.getItem('sign_priv_key_raw_' + user);
-            if (!signPrivHex) throw new Error("Kunci privat tidak ditemukan. Daftar ulang.");
+            // Persiapan challange
+            const keyPair = generateKeyPairFromPassword(user, pass);
+            const privKeyHex = keyPair.getPrivate('hex');
 
             // 1. req challenge
             const chalRes = await fetch(`${API_URL}/api/request_challenge`, {
@@ -71,23 +102,17 @@ if (loginForm) {
             const chalData = await chalRes.json();
             if(chalData.status !== 'ok') throw new Error(chalData.message);
             
-            const nonce = chalData.nonce; 
+            const nonceHash = sha3_256(chalData.nonce);
+            const nonceBytes = hexToBytes(nonceHash);
+            const signature = keyPair.sign(nonceBytes).toDER('hex');
 
-            // 2. has nonce
-            const nonceHash = sha3_256(nonce);
-
-            // 3. sign dgn library elliptic
-            const key = ec.keyFromPrivate(signPrivHex);
-            const signature = key.sign(nonceHash);
-            const signatureDer = signature.toDER('hex'); // kirim format DER
-
-            // 4. kirim ke server
+            // 3. kirim ke server
             const loginRes = await fetch(`${API_URL}/api/login`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     username: user, 
-                    signature: signatureDer
+                    signature: signature
                 }),
                 credentials: 'include'
             });
@@ -95,14 +120,17 @@ if (loginForm) {
 
             if (loginData.status === 'ok') {
                 localStorage.setItem('current_user', loginData.username);
+                localStorage.setItem('priv_key_' + user, privKeyHex);
                 window.location.href = "dashboard.html";
             } else {
                 notify(loginData.message, 'error');
                 btn.disabled = false;
+                btn.innerText = "Masuk";
             }
         } catch (err) {
             notify(err.message, 'error');
             btn.disabled = false;
+            btn.innerText = "Masuk";
         }
     });
 }
@@ -112,42 +140,54 @@ const regForm = document.getElementById("registerForm");
 if (regForm) {
     localStorage.removeItem('current_user');
 
+    const showPw = document.getElementById("showpw");
+    const passInput = document.getElementById("password");
+    const confirmInput = document.getElementById("confirm");
+    
+    if (showPw) {
+        showPw.addEventListener("change", () => {
+            const type = showPw.checked ? "text" : "password";
+            
+            if (passInput) passInput.type = type;
+            if (confirmInput) confirmInput.type = type; 
+        });
+    }
+
     regForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         notify("");
 
         const user = document.getElementById("username").value.trim();
-        const pass = document.getElementById("password").value;
+        const pass = passInput.value;
+        const confirmPass = confirmInput.value;
         const btn = document.getElementById("btnSubmit");
+
+        if (!user) {
+            notify("Username wajib diisi!", "error");
+            return;
+        }
+
+        if (pass !== confirmPass) {
+            notify("Password dan Konfirmasi Password tidak sama!", "error");
+            return;
+        }
+
+        if (pass.length < 8) {
+            notify("Password minimal 8 karakter.", "error");
+            return;
+        }
 
         btn.disabled = true;
         btn.innerText = "Generating ECC Keys...";
 
         try {
-            // 1. enkripsi chat
-            const encPair = await window.crypto.subtle.generateKey(
-                { name: "ECDH", namedCurve: "P-256" },
-                true, ["deriveKey", "deriveBits"]
-            );
+            // 1. Generate key
+            const keyPair = generateKeyPairFromPassword(user, pass);
+            const pubKeyHex = keyPair.getPublic(true, 'hex'); // Compressed format hex
+            const privKeyHex = keyPair.getPrivate('hex');
 
-            // 2. mendapatkan public key
-            const signPair = await window.crypto.subtle.generateKey(
-                { name: "ECDSA", namedCurve: "P-256" },
-                true, ["sign", "verify"]
-            );
-
-            const encPubRaw = await window.crypto.subtle.exportKey("raw", encPair.publicKey);
-            const signPubRaw = await window.crypto.subtle.exportKey("raw", signPair.publicKey);
-            
-            // simpan kunci ecdh
-            const encPrivJwk = await window.crypto.subtle.exportKey("jwk", encPair.privateKey);
-            localStorage.setItem('enc_priv_key_' + user, JSON.stringify(encPrivJwk));
-
-            // simpan private key ECDSA sebagai RAW HEX
-            const signPrivJwk = await window.crypto.subtle.exportKey("jwk", signPair.privateKey);
-            // konversi JWK 'd' (private exponent) base64url ke Hex
-            const privHex = base64UrlToHex(signPrivJwk.d);
-            localStorage.setItem('sign_priv_key_raw_' + user, privHex);
+            // 2. Simpan Private Key di LocalStorage (Untuk sesi ini)
+            localStorage.setItem('priv_key_' + user, privKeyHex);
 
             // register ke API (hex raw)
             const res = await fetch(`${API_URL}/api/register`, {
@@ -155,9 +195,8 @@ if (regForm) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     username: user, 
-                    password: pass, 
-                    public_key: bufToHex(encPubRaw),   // ECDH public
-                    signing_key: bufToHex(signPubRaw)  // ECDSA public
+                    public_key: pubKeyHex,
+                    signing_key: pubKeyHex
                 })
             });
             const data = await res.json();
@@ -168,6 +207,7 @@ if (regForm) {
             } else {
                 notify(data.message);
                 btn.disabled = false;
+                btn.innerText = "Buat Akun";
             }
         } catch (err) {
             console.error(err);
@@ -183,7 +223,7 @@ let currentUser = localStorage.getItem('current_user');
 async function initDashboard() {
     if (!currentUser) { window.location.href = "login.html"; return; }
     document.getElementById('currentUserDisplay').innerText = currentUser;
-    if (!localStorage.getItem('enc_priv_key_' + currentUser)) {
+    if (!localStorage.getItem('priv_key_' + currentUser)) {
         alert("Kunci hilang. Daftar ulang.");
         doLogout();
         return;
@@ -211,16 +251,6 @@ async function loadUsers() {
     } catch(e) {}
 }
 
-async function deriveSecretKey(privateKey, publicKey) {
-    return await window.crypto.subtle.deriveKey(
-        { name: "ECDH", public: publicKey },
-        privateKey,
-        { name: "AES-GCM", length: 256 },
-        false,
-        ["encrypt", "decrypt"]
-    );
-}
-
 async function sendMessage() {
     const recipient = document.getElementById('recipientSelect').value;
     const text = document.getElementById('msgInput').value;
@@ -229,51 +259,52 @@ async function sendMessage() {
     try {
         const keyRes = await fetch(`${API_URL}/api/get_public_key/${recipient}`, {cache: "no-store"});
         const keyData = await keyRes.json();
-        if (keyData.status !== 'ok') return alert("User error.");
+        if (keyData.status !== 'ok') return alert("User tidak ada.");
 
-        const recipientPubBytes = hexToBuf(keyData.keys.public_key);
-        const recipientPubKey = await window.crypto.subtle.importKey(
-            "raw", recipientPubBytes,
-            { name: "ECDH", namedCurve: "P-256" }, false, []
-        );
+        // Public key penerima
+        const recipientPubHex = keyData.keys.public_key;
 
-        const myEncPrivStr = localStorage.getItem('enc_priv_key_' + currentUser);
-        const myEncPrivKey = await window.crypto.subtle.importKey(
-            "jwk", JSON.parse(myEncPrivStr),
-            { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
-        );
+        // Private key pengirim
+        const myPrivHex = localStorage.getItem('priv_key_' + currentUser);
+        if(!myPrivHex) throw new Error("Sesi habis. Silakan login ulang.");
 
-        const aesKey = await deriveSecretKey(myEncPrivKey, recipientPubKey);
+        // Hashing
+        const timestamp = new Date().toISOString(); 
+        const payloadString = text + timestamp + currentUser + recipient;
+        const msgHashHex = sha3_256(payloadString);
+
+        // Signing
+        const myKey = ec.keyFromPrivate(myPrivHex);
+        const msgHashBytes = hexToBytes(msgHashHex);
+        const signature = myKey.sign(msgHashBytes).toDER('hex');
+
+        // Enkripsi
+        const aesKey = await deriveAesKeyFromEcdh(myPrivHex, recipientPubHex);
+        
+        // Enkripsi plaintext aja
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const encodedText = new TextEncoder().encode(text);
-        const ciphertext = await window.crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: iv },
-            aesKey,
-            encodedText
+        
+        const ciphertextBuf = await window.crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv }, aesKey, encodedText
         );
 
-        const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+        // Gabungkan dengan ciphertext lalu jadikan Base64
+        const combined = new Uint8Array(iv.length + ciphertextBuf.byteLength);
         combined.set(iv);
-        combined.set(new Uint8Array(ciphertext), iv.length);
+        combined.set(new Uint8Array(ciphertextBuf), iv.length);
         const contentBase64 = arrayBufferToBase64(combined.buffer);
 
-        // hash sha-3
-        const msgHashHex = sha3_256(contentBase64);
-
-        // sign sha-3
-        const signPrivHex = localStorage.getItem('sign_priv_key_raw_' + currentUser);
-        const key = ec.keyFromPrivate(signPrivHex);
-        const signature = key.sign(msgHashHex); // sign hash SHA3
-        const signatureDer = signature.toDER('hex');
-
+        // Kirim ke server
         await fetch(`${API_URL}/api/messages`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 recipient: recipient,
-                content: contentBase64,
-                msg_hash: msgHashHex,
-                signature: signatureDer
+                content: contentBase64,  // Pesan Terenkripsi
+                msg_hash: msgHashHex,    // Hash dari Plaintext+Meta
+                signature: signature,    // Tanda tangan
+                timestamp: timestamp     // Timestamp String
             }),
             credentials: 'include'
         });
@@ -282,7 +313,10 @@ async function sendMessage() {
         chatBox.innerHTML += `<div class="msg sent"><b>Saya:</b> ${text}</div>`;
         document.getElementById('msgInput').value = '';
 
-    } catch (e) { alert("Error: " + e.message); console.error(e); }
+    } catch (e) { 
+        alert("Gagal kirim: " + e.message); 
+        console.error(e); 
+    }
 }
 
 async function fetchMessages() {
@@ -293,74 +327,68 @@ async function fetchMessages() {
         const chatBox = document.getElementById('messageBox');
         chatBox.innerHTML = ''; 
 
-        const myEncPrivStr = localStorage.getItem('enc_priv_key_' + currentUser);
-        if(!myEncPrivStr) return;
-        const myEncPrivKey = await window.crypto.subtle.importKey(
-            "jwk", JSON.parse(myEncPrivStr),
-            { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
-        );
+        const myPrivHex = localStorage.getItem('priv_key_' + currentUser);
+        if(!myPrivHex) return;
 
         for (let msg of data.messages) {
-            let text = "[Gagal Dekripsi]";
-            let verifyStatus = "<span class='bad-sig'>Bad Sig</span>";
+            let plainText = "[Gagal Dekripsi]";
+            let verifyLabel = "";
+            let verifyClass = "bad-sig"; // Merah by default
 
             try {
-                // 1. verifikasi integritas
-                const senderKeyRes = await fetch(`${API_URL}/api/get_public_key/${msg.sender}`, {cache: "no-store"});
+                // 1. Ambil public key pengirim (untuk verifikasi signature & ecdh)
+                const senderKeyRes = await fetch(`${API_URL}/api/get_public_key/${msg.sender}`);
                 const senderData = await senderKeyRes.json();
-                
-                // Load Key Publik Pengirim ke Elliptic Lib
-                // Ingat: Elliptic butuh Uncompressed key (04 + X + Y)
-                // Database simpan raw (65 bytes 04...). Jadi langsung bisa dipakai hex-nya.
-                const key = ec.keyFromPublic(senderData.keys.signing_public_key, 'hex');
+                const senderPubHex = senderData.keys.public_key;
 
-                const computedHash = sha3_256(msg.content);
+                // Dekripsi
+                const aesKey = await deriveAesKeyFromEcdh(myPrivHex, senderPubHex);
 
-                if (computedHash === msg.msg_hash) {
-                    // verifikasi signature terhadap Hash
-                    if (key.verify(computedHash, msg.signature)) {
-                        verifyStatus = "<span class='verified'>✓ Verified (SHA3)</span>";
-                    }
-                } else {
-                    verifyStatus = "<span class='bad-sig'>Integrity Fail (SHA3)</span>";
-                }
-
-                // 2. dekripsi
-                const senderEncPubBytes = hexToBuf(senderData.keys.public_key);
-                const senderEncPub = await window.crypto.subtle.importKey(
-                    "raw", senderEncPubBytes,
-                    { name: "ECDH", namedCurve: "P-256" }, false, []
-                );
-
-                const aesKey = await deriveSecretKey(myEncPrivKey, senderEncPub);
+                // Pisahkan ciphertext
                 const combined = base64ToArrayBuffer(msg.content);
                 const iv = combined.slice(0, 12);
                 const ciphertext = combined.slice(12);
 
+                // dekripsi
                 const decryptedBuf = await window.crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv },
-                    aesKey,
-                    ciphertext
+                    { name: "AES-GCM", iv: iv }, aesKey, ciphertext
                 );
-                text = new TextDecoder().decode(decryptedBuf);
+                plainText = new TextDecoder().decode(decryptedBuf);
 
-            } catch (e) { console.error("Decrypt Error", e); }
+                // Rekonstruksi hash
+                const reconstructedString = plainText + msg.timestamp + msg.sender + currentUser;
+                const computedHash = sha3_256(reconstructedString);
 
-            chatBox.innerHTML += `<div class="msg received"><b>${msg.sender}:</b> ${text} <br> <span class="meta">${verifyStatus}</span></div>`;
+                // Verifikasi
+                if (computedHash !== msg.msg_hash) {
+                    verifyLabel = "INTEGRITY FAILED (Modified)";
+                } else {
+                    // 2. Cek signature (pakai public key pengirim)
+                    const senderEcKey = ec.keyFromPublic(senderPubHex, 'hex');
+                    const computedHashBytes = hexToBytes(computedHash);
+                    const isValid = senderEcKey.verify(computedHashBytes, msg.signature);
+                    
+                    if (isValid) {
+                        verifyLabel = "✓ Verified";
+                        verifyClass = "verified"; // Hijau
+                    } else {
+                        verifyLabel = "BAD SIGNATURE (Fake Sender)";
+                    }
+                }
+
+            } catch (e) {
+                console.error("Decryption fail:", e);
+                plainText = "<i>Pesan tidak dapat dibaca (Kunci berbeda atau rusak)</i>";
+            }
+
+            // Render Pesan
+            chatBox.innerHTML += `
+                <div class="msg received">
+                    <b>${msg.sender}:</b> ${plainText} <br> 
+                    <span class="meta ${verifyClass}">${verifyLabel} <span style="color:#aaa;margin-left:5px;">${msg.timestamp}</span></span>
+                </div>`;
         }
-    } catch (e) {}
-}
-
-// convert Base64URL ke hex (mengambil Private Key ECDSA)
-function base64UrlToHex(str) {
-    const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
-    let hex = [];
-    for(let i=0; i<bin.length; i++) {
-        let t = bin.charCodeAt(i).toString(16);
-        if(t.length < 2) t = "0" + t;
-        hex.push(t);
-    }
-    return hex.join('');
+    } catch (e) { console.error(e); }
 }
 
 let pollInterval;

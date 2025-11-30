@@ -34,7 +34,6 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
         public_key TEXT NOT NULL,          -- Kunci ECDH (Raw Hex Uncompressed)
         signing_public_key TEXT NOT NULL   -- Kunci ECDSA (Raw Hex Uncompressed)
     )''')
@@ -45,7 +44,7 @@ def init_db():
         content TEXT NOT NULL,
         msg_hash TEXT NOT NULL,
         signature TEXT NOT NULL,
-        timestamp DOUBLE NOT NULL
+        timestamp VARCHAR(50) NOT NULL
     )''')
     mysql.connection.commit()
     cursor.close()
@@ -74,8 +73,7 @@ def request_challenge():
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.json
-    username = data.get("username")
-    password = data.get("password") 
+    username = data.get("username") 
     public_key = data.get("public_key")
     signing_key = data.get("signing_key")
 
@@ -85,9 +83,9 @@ def register():
         cursor.close()
         return jsonify({"status": "error", "message": "Username sudah ada"}), 400
 
-    cursor.execute('''INSERT INTO users (username, password, public_key, signing_public_key) 
-                      VALUES (%s, %s, %s, %s)''', 
-                   (username, password, public_key, signing_key))
+    cursor.execute('''INSERT INTO users (username, public_key, signing_public_key) 
+                      VALUES (%s, %s, %s)''', 
+                   (username, public_key, signing_key))
     mysql.connection.commit()
     cursor.close()
     return jsonify({"status": "ok", "message": "Registrasi berhasil"})
@@ -168,11 +166,13 @@ def messages_handler():
     
     if request.method == "POST":
         data = request.json
+        client_timestamp = data.get('timestamp')
+
         cursor = mysql.connection.cursor()
         cursor.execute('''INSERT INTO messages (sender, recipient, content, msg_hash, signature, timestamp) 
                           VALUES (%s, %s, %s, %s, %s, %s)''', 
                        (session["user"], data['recipient'], data['content'], 
-                        data['msg_hash'], data['signature'], time.time()))
+                        data['msg_hash'], data['signature'], client_timestamp))
         mysql.connection.commit()
         cursor.close()
         return jsonify({"status": "ok"})
