@@ -164,32 +164,38 @@ def get_public_key(username):
         return jsonify({"status": "ok", "keys": user_data})
     return jsonify({"status": "error"}), 404
 
-@app.route("/api/messages", methods=["GET", "POST"])
-def messages_handler():
+@app.route("/api/messages", methods=["GET"])
+def get_messages():
     if "user" not in session: return jsonify({"status": "error", "message": "Unauthorized"}), 401
     
-    if request.method == "POST":
-        data = request.json
-        client_timestamp = data.get('timestamp')
+    # Logic ambil pesan (Polling)
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    # Query yang sudah diperbaiki (Penerima ATAU Pengirim)
+    cursor.execute('''
+        SELECT * FROM messages 
+        WHERE recipient = %s OR sender = %s 
+        ORDER BY timestamp ASC
+    ''', (session["user"], session["user"]))
+    msgs = cursor.fetchall()
+    cursor.close()
+    return jsonify({"status": "ok", "messages": msgs})
 
-        cursor = mysql.connection.cursor()
-        cursor.execute('''INSERT INTO messages (sender, recipient, content, msg_hash, signature, timestamp) 
-                          VALUES (%s, %s, %s, %s, %s, %s)''', 
-                       (session["user"], data['recipient'], data['content'], 
-                        data['msg_hash'], data['signature'], client_timestamp))
-        mysql.connection.commit()
-        cursor.close()
-        return jsonify({"status": "ok"})
-    else:
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute('''
-            SELECT * FROM messages 
-            WHERE recipient = %s OR sender = %s 
-            ORDER BY timestamp ASC
-        ''', (session["user"], session["user"]))
-        msgs = cursor.fetchall()
-        cursor.close()
-        return jsonify({"status": "ok", "messages": msgs})
+@app.route("/api/send", methods=["POST"])
+def send_message_endpoint():
+    if "user" not in session: return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    
+    # Logic kirim pesan
+    data = request.json
+    client_timestamp = data.get('timestamp')
+
+    cursor = mysql.connection.cursor()
+    cursor.execute('''INSERT INTO messages (sender, recipient, content, msg_hash, signature, timestamp) 
+                      VALUES (%s, %s, %s, %s, %s, %s)''', 
+                   (session["user"], data['recipient'], data['content'], 
+                    data['msg_hash'], data['signature'], client_timestamp))
+    mysql.connection.commit()
+    cursor.close()
+    return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

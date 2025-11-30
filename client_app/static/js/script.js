@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:5000"; 
+const API_URL = "http://127.0.0.1:5000";
 // inisialisasi elliptic curve(P-256 / secp256r1)
 const EC = elliptic.ec;
 const ec = new EC('p256');
@@ -297,7 +297,7 @@ async function sendMessage() {
         const contentBase64 = arrayBufferToBase64(combined.buffer);
 
         // Kirim ke server
-        await fetch(`${API_URL}/api/messages`, {
+        await fetch(`${API_URL}/api/send`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
