@@ -115,6 +115,10 @@ def login():
     try:
         # 1. load public key
         key_bytes = bytes.fromhex(signing_pub_key_hex)
+
+        if len(key_bytes) == 65 and key_bytes[0] == 4:
+            key_bytes = key_bytes[1:]
+
         vk = VerifyingKey.from_string(key_bytes, curve=NIST256p)
         
         # 2. hash nonce menggunakan SHA3-256
@@ -122,7 +126,7 @@ def login():
         
         # 3. verif signature
         vk.verify_digest(bytes.fromhex(signature_hex), msg_hash, sigdecode=sigdecode_der)
-        
+
         session["user"] = username
         session.permanent = True
         return jsonify({"status": "ok", "username": username})

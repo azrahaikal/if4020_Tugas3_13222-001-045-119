@@ -82,7 +82,7 @@ if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const user = document.getElementById("username").value.trim();
-        const pass = document.getElementById("password");
+        const pass = document.getElementById("password").value;
         const btn = document.getElementById("btnLogin");
 
         btn.disabled = true;
@@ -92,6 +92,7 @@ if (loginForm) {
             // Persiapan challange
             const keyPair = generateKeyPairFromPassword(user, pass);
             const privKeyHex = keyPair.getPrivate('hex');
+            const myPubKeyCheck = keyPair.getPublic(false, 'hex');
 
             // 1. req challenge
             const chalRes = await fetch(`${API_URL}/api/request_challenge`, {
@@ -183,7 +184,7 @@ if (regForm) {
         try {
             // 1. Generate key
             const keyPair = generateKeyPairFromPassword(user, pass);
-            const pubKeyHex = keyPair.getPublic(true, 'hex'); // Compressed format hex
+            const pubKeyHex = keyPair.getPublic(false, 'hex'); // uncompressed format hex
             const privKeyHex = keyPair.getPrivate('hex');
 
             // 2. Simpan Private Key di LocalStorage (Untuk sesi ini)
