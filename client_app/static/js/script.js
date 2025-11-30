@@ -323,58 +323,66 @@ async function sendMessage() {
 async function fetchMessages() {
     if (!currentUser) return;
     try {
+        // 1. Ambil data dari server
         const res = await fetch(`${API_URL}/api/messages`, {credentials: 'include', cache: "no-store"});
         const data = await res.json();
-        const chatBox = document.getElementById('messageBox');
-        chatBox.innerHTML = ''; 
-
+        
+        // Cek private key dulu
         const myPrivHex = localStorage.getItem('priv_key_' + currentUser);
         if(!myPrivHex) return;
 
+        // Kita buat variabel penampung string HTML sementara
+        let tempHTML = ""; 
+
+        // Proses setiap pesan
         for (let msg of data.messages) {
             let plainText = "[Gagal Dekripsi]";
             let verifyLabel = "";
-            let verifyClass = "bad-sig"; // Merah by default
+            let verifyClass = "bad-sig"; 
 
             try {
-                // 1. Ambil public key pengirim (untuk verifikasi signature & ecdh)
-                const senderKeyRes = await fetch(`${API_URL}/api/get_public_key/${msg.sender}`);
-                const senderData = await senderKeyRes.json();
-                const senderPubHex = senderData.keys.public_key;
+                // Jika saya pengirim, saya butuh Public Key penerima (lawan bicara)
+                // Jika saya penerima, saya butuh Public Key pengirim (lawan bicara)
+                const counterpartUser = (msg.sender === currentUser) ? msg.recipient : msg.sender;
 
-                // Dekripsi
-                const aesKey = await deriveAesKeyFromEcdh(myPrivHex, senderPubHex);
+                // Ambil public key lawan bicara
+                const keyRes = await fetch(`${API_URL}/api/get_public_key/${counterpartUser}`);
+                const keyData = await keyRes.json();
+                const counterpartPubHex = keyData.keys.public_key;
 
-                // Pisahkan ciphertext
+                // Derive Key & Dekripsi
+                const aesKey = await deriveAesKeyFromEcdh(myPrivHex, counterpartPubHex);
+                
                 const combined = base64ToArrayBuffer(msg.content);
                 const iv = combined.slice(0, 12);
                 const ciphertext = combined.slice(12);
 
-                // dekripsi
                 const decryptedBuf = await window.crypto.subtle.decrypt(
                     { name: "AES-GCM", iv: iv }, aesKey, ciphertext
                 );
                 plainText = new TextDecoder().decode(decryptedBuf);
 
-                // Rekonstruksi hash
-                const reconstructedString = plainText + msg.timestamp + msg.sender + currentUser;
+                // Verifikasi Hash & Signature
+                const reconstructedString = plainText + msg.timestamp + msg.sender + msg.recipient;
                 const computedHash = sha3_256(reconstructedString);
 
-                // Verifikasi
-                if (computedHash !== msg.msg_hash) {
-                    verifyLabel = "INTEGRITY FAILED (Modified)";
+                let signerPubHex = counterpartPubHex;
+
+                if (msg.sender === currentUser) {
+                    const myKeyRes = await fetch(`${API_URL}/api/get_public_key/${currentUser}`);
+                    const myKeyData = await myKeyRes.json();
+                    signerPubHex = myKeyData.keys.public_key;
+                }
+
+                const senderEcKey = ec.keyFromPublic(signerPubHex, 'hex');
+                const computedHashBytes = hexToBytes(computedHash);
+                const isValid = senderEcKey.verify(computedHashBytes, msg.signature);
+
+                if (isValid) {
+                    verifyLabel = "✓ Verified";
+                    verifyClass = "verified";
                 } else {
-                    // 2. Cek signature (pakai public key pengirim)
-                    const senderEcKey = ec.keyFromPublic(senderPubHex, 'hex');
-                    const computedHashBytes = hexToBytes(computedHash);
-                    const isValid = senderEcKey.verify(computedHashBytes, msg.signature);
-                    
-                    if (isValid) {
-                        verifyLabel = "✓ Verified";
-                        verifyClass = "verified"; // Hijau
-                    } else {
-                        verifyLabel = "BAD SIGNATURE (Fake Sender)";
-                    }
+                    verifyLabel = "BAD SIGNATURE";
                 }
 
             } catch (e) {
@@ -382,13 +390,21 @@ async function fetchMessages() {
                 plainText = "<i>Pesan tidak dapat dibaca (Kunci berbeda atau rusak)</i>";
             }
 
-            // Render Pesan
-            chatBox.innerHTML += `
-                <div class="msg received">
+            // Masukkan ke variabel sementara
+            tempHTML += `
+                <div class="msg ${msg.sender === currentUser ? 'sent' : 'received'}">
                     <b>${msg.sender}:</b> ${plainText} <br> 
                     <span class="meta ${verifyClass}">${verifyLabel} <span style="color:#aaa;margin-left:5px;">${msg.timestamp}</span></span>
                 </div>`;
         }
+
+        const chatBox = document.getElementById('messageBox');
+        if (chatBox.innerHTML !== tempHTML) {
+            chatBox.innerHTML = tempHTML;
+            // Scroll otomatis ke bawah kalau ada chat baru
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
     } catch (e) { console.error(e); }
 }
 

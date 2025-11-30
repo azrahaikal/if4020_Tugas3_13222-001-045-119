@@ -182,7 +182,11 @@ def messages_handler():
         return jsonify({"status": "ok"})
     else:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute('SELECT * FROM messages WHERE recipient = %s ORDER BY timestamp ASC', (session["user"],))
+        cursor.execute('''
+            SELECT * FROM messages 
+            WHERE recipient = %s OR sender = %s 
+            ORDER BY timestamp ASC
+        ''', (session["user"], session["user"]))
         msgs = cursor.fetchall()
         cursor.close()
         return jsonify({"status": "ok", "messages": msgs})
