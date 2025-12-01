@@ -4,7 +4,7 @@ import time
 import MySQLdb.cursors
 
 app = Flask(__name__)
-app.secret_key = "ganti_dengan_secret_key_yang_aman"
+app.secret_key = "RAHASIA_DAPUR_JANGAN_DISEBAR"
 
 # --- konfigurasi MySQL ---
 app.config['MYSQL_HOST'] = 'localhost'
